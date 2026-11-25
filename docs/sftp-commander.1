@@ -1,0 +1,104 @@
+'\" t
+.TH SFTP-COMMANDER 1 "2026-11-24" "sftp-commander 0.7.0" "User Commands"
+.SH NAME
+sftp-commander \- two-pane SFTP client in the style of WinSCP Commander
+.SH SYNOPSIS
+.B sftp-commander
+.RI [ server ]
+.RB [ \-i
+.IR keyfile ]
+.br
+.B sftp-commander \-\-prueba
+.IR user @ host [: port ]
+.RB [ \-i
+.IR keyfile ]
+.RB [ \-\-known\-hosts
+.IR file ]
+.RB [ \-\-aceptar\-host ]
+.br
+.B sftp-commander \-\-version
+.SH DESCRIPTION
+.B sftp-commander
+is a graphical SFTP client for GTK 4. It shows the local computer and the
+server side by side and copies files between them with the keyboard or the
+right-click menu. Each tab holds an independent session. The user interface
+is in Spanish.
+.PP
+It uses the standard OpenSSH files: aliases from
+.IR ~/.ssh/config ,
+host keys from
+.IR ~/.ssh/known_hosts ,
+keys from
+.I ~/.ssh
+and ssh-agent. Passwords are only stored, when the user asks for it, in the
+system keyring through the Secret Service API.
+.SH ARGUMENTS
+.TP
+.I server
+Connect on start. It can be the name of a saved server, an alias from
+.IR ~/.ssh/config ,
+.IR user @ host [: port ]
+or an
+.BI sftp:// user @ host [: port ]
+URL.
+.SH OPTIONS
+.TP
+.BI \-i " keyfile"
+Private key to use when connecting.
+.TP
+.BI \-J " user@host[:port]"
+Connect through this jump server (bastion), like
+.BR "ssh \-J" .
+The destination is reached through an SSH tunnel opened on the jump server.
+.TP
+.BI \-\-known\-hosts " file"
+Use this file instead of
+.IR ~/.ssh/known_hosts .
+.TP
+.B \-\-prueba
+Run an end-to-end SFTP test without a window against the given server and
+exit with status 0 if everything worked. It creates and removes a temporary
+folder in the remote home directory.
+.TP
+.B \-\-aceptar\-host
+With
+.BR \-\-prueba ,
+accept and store an unknown host key.
+.TP
+.BI \-\-que\-app " file"
+Print which application would be used to open
+.I file
+and exit.
+.TP
+.B \-\-version
+Print the version and exit.
+.SH KEYS
+.TS
+l l.
+F5	Copy the selection to the other pane
+F4, Enter	Open or edit
+F2	Rename
+F7	New folder
+Shift+F4	New empty document
+F8, Delete	Delete
+Ctrl+F	Search in the current folder
+Ctrl+Shift+C	Copy path
+Ctrl+T, Ctrl+W	New tab, close tab
+Ctrl+R	Refresh
+Ctrl+H	Show or hide hidden files
+Ctrl+L	Manage saved servers
+.TE
+.SH FILES
+.TP
+.I ~/.config/sftp-commander/servidores.ini
+Saved servers (never contains passwords).
+.TP
+.I ~/.cache/sftp-commander/editar/
+Temporary copies of remote files being edited; removed on exit.
+.SH SEE ALSO
+.BR ssh (1),
+.BR sftp (1),
+.BR ssh_config (5)
+.PP
+The user guide is installed in
+.IR /usr/share/doc/sftp-commander/ .

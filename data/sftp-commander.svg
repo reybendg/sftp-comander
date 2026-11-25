@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ícono de SFTP Commander: dos paneles (local | remoto) con una flecha de ida y vuelta. GPL-3.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3584e4"/>
+      <stop offset="1" stop-color="#1a5fb4"/>
+    </linearGradient>
+    <linearGradient id="flecha" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffbe3d"/>
+      <stop offset="1" stop-color="#f08c00"/>
+    </linearGradient>
+  </defs>
+  <!-- fondo -->
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="url(#fondo)"/>
+  <!-- barra de título -->
+  <rect x="32" y="40" width="192" height="18" rx="6" fill="#ffffff" fill-opacity="0.35"/>
+  <!-- panel izquierdo (local) -->
+  <rect x="32" y="68" width="88" height="148" rx="10" fill="#ffffff"/>
+  <rect x="44" y="84" width="64" height="10" rx="4" fill="#99c1f1"/>
+  <rect x="44" y="104" width="52" height="10" rx="4" fill="#99c1f1"/>
+  <rect x="44" y="124" width="60" height="10" rx="4" fill="#99c1f1"/>
+  <rect x="44" y="144" width="44" height="10" rx="4" fill="#99c1f1"/>
+  <!-- panel derecho (remoto) -->
+  <rect x="136" y="68" width="88" height="148" rx="10" fill="#ffffff"/>
+  <rect x="148" y="84" width="60" height="10" rx="4" fill="#99c1f1"/>
+  <rect x="148" y="104" width="64" height="10" rx="4" fill="#99c1f1"/>
+  <rect x="148" y="124" width="48" height="10" rx="4" fill="#99c1f1"/>
+  <rect x="148" y="144" width="56" height="10" rx="4" fill="#99c1f1"/>
+  <!-- flecha doble entre paneles -->
+  <g stroke="#7a4100" stroke-width="5" stroke-linejoin="round" fill="url(#flecha)">
+    <path d="M58 182 L86 160 L86 172 L170 172 L170 160 L198 182 L170 204 L170 192 L86 192 L86 204 Z"/>
+  </g>
+</svg>

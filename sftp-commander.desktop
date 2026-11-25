@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SFTP Commander
+Comment=Cliente SFTP de dos paneles (local y remoto)
+Exec=sftp-commander %u
+Icon=sftp-commander
+Terminal=false
+Categories=Network;FileTransfer;GTK;
+MimeType=x-scheme-handler/sftp;

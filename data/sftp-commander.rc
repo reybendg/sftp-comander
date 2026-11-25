@@ -1,0 +1,30 @@
+// Recursos de Windows: ícono del .exe y datos de versión (los ve el Explorador)
+#include <winver.h>
+
+1 ICON "sftp-commander.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     VER_NUM
+PRODUCTVERSION  VER_NUM
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "SFTP Commander"
+            VALUE "FileDescription",  "SFTP Commander"
+            VALUE "FileVersion",      VER_TXT
+            VALUE "InternalName",     "sftp-commander"
+            VALUE "LegalCopyright",   "GPL-3.0"
+            VALUE "OriginalFilename", "sftp-commander.exe"
+            VALUE "ProductName",      "SFTP Commander"
+            VALUE "ProductVersion",   VER_TXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -1,0 +1,18 @@
+# Compilado y paquetes (los .deb se suben a Releases, no al repositorio)
+/sftp-commander
+/sftp-commander.exe
+*.o
+/dist/
+
+# Notas internas y respaldos: no se publican
+/NOTAS.md
+/backup/
+/winscp-linux/
+
+# Editores y sistema
+*.swp
+*~
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
