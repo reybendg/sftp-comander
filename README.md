@@ -49,8 +49,8 @@ It is a new program, not a port of WinSCP: it borrows the idea, not the code.
 |---|---|---|
 | **Windows 10 / 11** (64-bit) | [`sftp-commander-0.7.0-instalador.exe`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander-0.7.0-instalador.exe) | Installer, no administrator rights needed |
 | | [`sftp-commander-0.7.0-windows-x64.zip`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander-0.7.0-windows-x64.zip) | Portable, extract and run |
-| **Debian 13** (trixie) | [`sftp-commander_0.7.0-1~deb13_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.deb13_amd64.deb) | `sudo apt install ./<file>` |
-| **Ubuntu 24.04** / Mint 22 | [`sftp-commander_0.7.0-1~ubuntu24.04_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb) | `sudo apt install ./<file>` |
+| **Debian 13** (trixie) | [`sftp-commander_0.7.0-1.deb13_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.deb13_amd64.deb) | `sudo apt install ./<file>` |
+| **Ubuntu 24.04** / Mint 22 | [`sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb) | `sudo apt install ./<file>` |
 | Other Linux | [Build from source](#build-from-source) | About a minute |
 
 All files are on the [Releases](https://github.com/reybendg/sftp-comander/releases) page.
@@ -118,8 +118,8 @@ On Windows the local pane has a *Unidad* (drive) button for `C:\`, `D:\` and USB
 ### Debian 13 / Ubuntu 24.04
 
 ```bash
-sudo apt install ./sftp-commander_0.7.0-1~deb13_amd64.deb         # Debian 13
-sudo apt install ./sftp-commander_0.7.0-1~ubuntu24.04_amd64.deb    # Ubuntu 24.04, Mint 22
+sudo apt install ./sftp-commander_0.7.0-1.deb13_amd64.deb         # Debian 13
+sudo apt install ./sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb    # Ubuntu 24.04, Mint 22
 ```
 
 apt pulls the dependencies. Remove it with `sudo apt remove sftp-commander`.

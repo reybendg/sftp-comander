@@ -47,8 +47,8 @@ Es un programa nuevo, no un port de WinSCP: toma la idea, no el código.
 |---|---|---|
 | **Windows 10 / 11** (64 bits) | [`sftp-commander-0.7.0-instalador.exe`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander-0.7.0-instalador.exe) | Instalador, no pide administrador |
 | | [`sftp-commander-0.7.0-windows-x64.zip`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander-0.7.0-windows-x64.zip) | Portable: descomprimir y abrir |
-| **Debian 13** (trixie) | [`sftp-commander_0.7.0-1~deb13_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.deb13_amd64.deb) | `sudo apt install ./<archivo>` |
-| **Ubuntu 24.04** / Mint 22 | [`sftp-commander_0.7.0-1~ubuntu24.04_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb) | `sudo apt install ./<archivo>` |
+| **Debian 13** (trixie) | [`sftp-commander_0.7.0-1.deb13_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.deb13_amd64.deb) | `sudo apt install ./<archivo>` |
+| **Ubuntu 24.04** / Mint 22 | [`sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb) | `sudo apt install ./<archivo>` |
 | Otro Linux | [Compilar desde el código](#compilar-desde-el-código) | Toma un minuto |
 
 Todos los archivos están en la página de [Releases](https://github.com/reybendg/sftp-comander/releases).
@@ -116,8 +116,8 @@ En Windows el panel local tiene un botón *Unidad* para `C:\`, `D:\` y pendrives
 ### Debian 13 / Ubuntu 24.04
 
 ```bash
-sudo apt install ./sftp-commander_0.7.0-1~deb13_amd64.deb         # Debian 13
-sudo apt install ./sftp-commander_0.7.0-1~ubuntu24.04_amd64.deb    # Ubuntu 24.04, Mint 22
+sudo apt install ./sftp-commander_0.7.0-1.deb13_amd64.deb         # Debian 13
+sudo apt install ./sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb    # Ubuntu 24.04, Mint 22
 ```
 
 apt trae las dependencias. Se quita con `sudo apt remove sftp-commander`.
