@@ -93,6 +93,8 @@ G_DEFINE_QUARK(sftp-commander-error, con_error)
 
 void con_init(void) { ssh_init(); }
 
+const char *con_version_libssh(void) { return ssh_version(0); }
+
 void entrada_free(gpointer p)
 {
     Entrada *e = p;

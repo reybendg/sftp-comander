@@ -119,21 +119,41 @@ La misma ventana aparece si una operación falla porque la conexión ya no está
 
 | Acción | Teclas | Notas |
 |---|---|---|
-| Copiar al otro panel | F5 | Sube o baja; las carpetas se copian enteras. Los archivos que ya existen se sobrescriben sin preguntar. |
+| Copiar al otro panel | F4, o arrastrar | Sube o baja; las carpetas se copian enteras. Ver *Copiar sin pisar nada* |
+| Abrir / editar | Enter o doble clic | |
 | Renombrar | F2 | |
 | Nueva carpeta | F7 | |
 | Nuevo documento vacío | Mayús+F4 | Nunca pisa un archivo existente |
 | Borrar | F8 o Supr | Pregunta antes; las carpetas se borran con todo su contenido |
-| Actualizar | Ctrl+R | |
+| Actualizar | F5 o Ctrl+R | Los dos paneles |
 | Archivos ocultos | Ctrl+H | |
+| Acerca de | F1 | Versión, autor y enlace al proyecto |
 
-El menú del clic derecho tiene las mismas acciones. Un clic derecho en una zona vacía quita la selección, útil para *Nueva carpeta*.
+El menú del clic derecho tiene las mismas acciones. Un clic derecho en una zona vacía quita la selección, útil para *Nueva carpeta*. El botón ☰, a la derecha de la barra de conexión, tiene *Preguntar antes de copiar*, *Mostrar archivos ocultos* y *Acerca de*.
 
-Las copias largas muestran una barra de progreso y un botón *Cancelar* en la barra de estado de esa pestaña.
+Las copias largas muestran una barra de progreso y un botón *Cancelar* en la barra de estado de esa pestaña. Al terminar, los dos paneles se actualizan solos.
+
+### Copiar sin pisar nada
+
+- Antes de copiar, una ventana pregunta qué se sube o se baja y a dónde. Si marcas *No volver a preguntar*, copia directo; se vuelve a activar en ☰ > *Preguntar antes de copiar*.
+- Si en el destino ya hay algo con el mismo nombre, **siempre** pregunta, aunque hayas desactivado la confirmación: *Reemplazar*, *Omitir existentes* (copia solo lo nuevo) o *Cancelar*. Enter elige *Cancelar*, para no pisar nada por apuro.
+
+### Arrastrar y soltar
+
+- Arrastra archivos o carpetas de un panel al otro para copiarlos. Para varios, selecciónalos con Ctrl+clic, Mayús+clic o Ctrl+A y arrastra cualquiera de ellos: se llevan todos. Si arrastras una fila no seleccionada, se copia solo esa.
+- Suelta archivos desde el explorador del sistema (Explorador de Windows, Nautilus, Dolphin…) sobre el **panel del servidor** para subirlos a la carpeta remota que se ve.
+
+### Ordenar
+
+Clic en el título de una columna (*Nombre*, *Tamaño*, *Modificado*, *Permisos*) ordena por ella; otro clic invierte el orden (de mayor a menor, o de la Z a la A). La flecha junto al título muestra el orden actual. ".." y las carpetas quedan siempre arriba.
+
+### Saltar a un archivo tecleando
+
+Con el foco en un panel, escribe el comienzo de un nombre: se selecciona el primero que empiece así (`m` va al primero con M; `mis` a `mis-notas.txt`). Si ninguno empieza así, va al primero que lo contenga. Las letras tecleadas en menos de un segundo se suman; repetir la misma letra (`m`, `m`, `m`) pasa al siguiente que empiece con ella, como en el Explorador. La barra de estado muestra lo tecleado.
 
 ### Buscar
 
-**Ctrl+F** (o *Buscar en esta carpeta* en el clic derecho) muestra un campo de búsqueda en el panel activo y filtra la carpeta actual mientras escribes:
+**Ctrl+F**, la **lupa** junto a la ruta de cada panel o *Buscar en esta carpeta* en el clic derecho muestran un campo de búsqueda en el panel activo y filtra la carpeta actual mientras escribes:
 
 - no distingue mayúsculas: `log` encuentra `Servicio.LOG`;
 - `*` y `?` son comodines: `*.conf`, `backup-2026-??-*`;
@@ -148,7 +168,7 @@ Busca solo en la carpeta actual, no en las subcarpetas.
 
 ### Abrir y editar archivos remotos
 
-Doble clic sobre un archivo remoto (o Enter o F4):
+Doble clic sobre un archivo remoto (o Enter):
 
 1. Se baja a `~/.cache/sftp-commander/editar/<aleatorio>/`.
 2. Se abre con un programa local: para texto, logs y configuraciones, un editor gráfico; para imágenes, un visor; para lo demás, el predeterminado del sistema.

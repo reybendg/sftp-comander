@@ -83,10 +83,11 @@ cap pestanas pestanas
 cap servidores servidores
 cap menu menu
 cap salto "" "Interno vía bastión"
+cap acerca acerca
 DEMO
 DENTRO
 
-for f in principal buscar pestanas servidores menu salto; do
+for f in principal buscar pestanas servidores menu salto acerca; do
     docker cp "sftpc-demo:/tmp/cap-$f.png" "docs/img/$f.png" 2>/dev/null || echo "falta $f"
 done
 if [ "${1:-}" = mantener ]; then

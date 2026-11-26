@@ -34,6 +34,7 @@ typedef gboolean (*ConPreguntas)(const char *nombre, const char *instruccion, in
                                  char **respuestas, gpointer data);
 
 void       con_init(void);
+const char *con_version_libssh(void);   /* para "Acerca de" */
 /* Acepta "usuario@host:puerto", "sftp://usuario@host:puerto/..." o un alias de ~/.ssh/config */
 gboolean   destino_parsear(const char *txt, char **usuario, char **host, int *puerto);
 

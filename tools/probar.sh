@@ -64,6 +64,8 @@ mkdir -p "$XDG_CONFIG_HOME/sftp-commander"
 mkdir -p "$D/remoto"
 echo "texto original" > "$D/remoto/nota.txt"
 echo "linea de log" > "$D/remoto/servicio.log"
+head -c 5000 /dev/zero > "$D/remoto/zz-grande.bin"   # para probar el orden por tamaño
+mkdir -p "$D/remoto/carpeta"
 cat > "$XDG_CONFIG_HOME/sftp-commander/servidores.ini" <<EOF
 [Prueba local]
 servidor=127.0.0.1
@@ -156,6 +158,14 @@ escenario perdida     "DIALOGO: Se perdió la conexión" "Al volver a una pesta�
 escenario reconectar  "Estado: Conectado a" "Reconectar desde el diálogo vuelve a la misma carpeta"
 grep -q "Pestañas: 2" "$D/reconectar.txt" && echo "OK     la otra pestaña sigue abierta" \
     || { echo "FALLA  se perdió la otra pestaña"; exit 1; }
+escenario acerca    "ACERCA: SFTP Commander $(sed -n 's/^#define VERSION "\(.*\)"/\1/p' src/main.c)" \
+    "Acerca de muestra la versión y el proyecto"
+escenario ordenar   "ORDEN: .. carpeta zz-grande.bin" "Ordenar por tamaño, de mayor a menor (carpetas arriba)"
+escenario conflicto "CONFLICTO: 1 ya existen: nota.txt" "Avisa antes de sobrescribir un archivo que ya existe"
+escenario confirmar "CONFIRMAR: bajar 1 elemento(s)" "Pregunta antes de copiar"
+escenario soltar    "CONFIRMAR: subir 1 elemento(s) a $D/remoto" "Soltar un archivo del explorador en el panel remoto lo sube"
+escenario varios    "CONFIRMAR: bajar 3 elemento(s)" "Arrastrar uno de 3 seleccionados lleva los 3"
+escenario saltar    "SALTO: no=nota.txt grande=zz-grande.bin zz=zz-grande.bin" "Teclear letras salta al archivo (inicio, contenido, misma letra)"
 
 # servidor de salto: el mismo sshd hace de salto y de destino
 escenario salto      "vía $USER@127.0.0.1:$PUERTO" "Conectar a través de un servidor de salto" "Bastion prueba"

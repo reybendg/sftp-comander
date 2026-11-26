@@ -32,7 +32,7 @@
 
 ## About
 
-SFTP Commander shows your computer on the left and the server on the right. You move files between them with the keyboard (**F5** copies, **F8** deletes, **F7** creates a folder) or with the right-click menu, just like WinSCP or Total Commander.
+SFTP Commander shows your computer on the left and the server on the right. You move files between them by dragging them, with the keyboard (**F4** copies, **F5** refreshes, **F8** deletes, **F7** creates a folder) or with the right-click menu, like WinSCP or Total Commander.
 
 - **Native and light.** A GTK 4 app that starts instantly and uses little memory: no Java, Electron or Wine.
 - **Uses what you already have.** `~/.ssh/config` aliases, `known_hosts`, your keys and ssh-agent work out of the box.
@@ -47,10 +47,10 @@ It is a new program, not a port of WinSCP: it borrows the idea, not the code.
 
 | System | File | Notes |
 |---|---|---|
-| **Windows 10 / 11** (64-bit) | [`sftp-commander-0.7.0-instalador.exe`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander-0.7.0-instalador.exe) | Installer, no administrator rights needed |
-| | [`sftp-commander-0.7.0-windows-x64.zip`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander-0.7.0-windows-x64.zip) | Portable, extract and run |
-| **Debian 13** (trixie) | [`sftp-commander_0.7.0-1.deb13_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.deb13_amd64.deb) | `sudo apt install ./<file>` |
-| **Ubuntu 24.04** / Mint 22 | [`sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.7.0/sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb) | `sudo apt install ./<file>` |
+| **Windows 10 / 11** (64-bit) | [`sftp-commander-0.8.0-instalador.exe`](https://github.com/reybendg/sftp-comander/releases/download/v0.8.0/sftp-commander-0.8.0-instalador.exe) | Installer, no administrator rights needed |
+| | [`sftp-commander-0.8.0-windows-x64.zip`](https://github.com/reybendg/sftp-comander/releases/download/v0.8.0/sftp-commander-0.8.0-windows-x64.zip) | Portable, extract and run |
+| **Debian 13** (trixie) | [`sftp-commander_0.8.0-1.deb13_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.8.0/sftp-commander_0.8.0-1.deb13_amd64.deb) | `sudo apt install ./<file>` |
+| **Ubuntu 24.04** / Mint 22 | [`sftp-commander_0.8.0-1.ubuntu24.04_amd64.deb`](https://github.com/reybendg/sftp-comander/releases/download/v0.8.0/sftp-commander_0.8.0-1.ubuntu24.04_amd64.deb) | `sudo apt install ./<file>` |
 | Other Linux | [Build from source](#build-from-source) | About a minute |
 
 All files are on the [Releases](https://github.com/reybendg/sftp-comander/releases) page.
@@ -78,6 +78,10 @@ All files are on the [Releases](https://github.com/reybendg/sftp-comander/releas
 
 **And also:**
 
+- **Drag and drop** between the two panes (one or several selected), or from your file manager (Explorer, Nautilus…) onto the server pane to upload.
+- **Type to jump**: type the beginning of a name in a pane and it gets selected; repeat the letter to go to the next one.
+- **Never overwrites by accident.** Copies ask first (with *Don't ask again*), and if something with the same name already exists it always offers *Replace*, *Skip existing* or *Cancel*.
+- **Sort by any column**: click *Name*, *Size* or *Modified*; click again for descending order. Folders stay on top.
 - **Edit remote files in place.** Double-click a remote file: it opens in your local editor, and every time you save it is uploaded back automatically.
 - **Lost connection handling.** Come back to a tab whose network dropped and choose *Reconnect* (to the same folder), *Not now* or *Close tab*.
 - **Connection progress** with each step (connecting, keyring, signing in) and a *Cancel* button.
@@ -89,19 +93,22 @@ All files are on the [Releases](https://github.com/reybendg/sftp-comander/releas
 
 <p align="center">
   <img src="docs/img/menu.png" width="260" alt="Right-click menu">
+  &nbsp;&nbsp;
+  <img src="docs/img/acerca.png" width="380" alt="About window">
 </p>
 
 ### Keyboard shortcuts
 
 | Key | Action | Key | Action |
 |---|---|---|---|
-| **F5** | Copy to the other pane | **Ctrl+F** | Search in the folder |
-| **F2** | Rename | **Ctrl+Shift+C** | Copy path |
-| **F4** / Enter | Open or edit | **Ctrl+T** / **Ctrl+W** | New / close tab |
-| **F7** | New folder | **Ctrl+R** | Refresh |
-| **Shift+F4** | New empty document | **Ctrl+H** | Show hidden files |
-| **F8** / Delete | Delete (asks first) | **Ctrl+L** | Saved servers |
-| Backspace | Parent folder | | |
+| **F4** | Copy to the other pane | **Ctrl+F** | Search in the folder (or the magnifier) |
+| **F5** / Ctrl+R | Refresh | **Ctrl+Shift+C** | Copy path |
+| Enter / double click | Open or edit | **Ctrl+T** / **Ctrl+W** | New / close tab |
+| **F2** | Rename | **Ctrl+H** | Show hidden files |
+| **F7** | New folder | **Ctrl+L** | Saved servers |
+| **Shift+F4** | New empty document | **F1** | About |
+| **F8** / Delete | Delete (asks first) | Backspace | Parent folder |
+| Letters | Jump to the file starting with them | Ctrl+click / Shift+click | Select several |
 
 ## Installation
 
@@ -118,8 +125,8 @@ On Windows the local pane has a *Unidad* (drive) button for `C:\`, `D:\` and USB
 ### Debian 13 / Ubuntu 24.04
 
 ```bash
-sudo apt install ./sftp-commander_0.7.0-1.deb13_amd64.deb         # Debian 13
-sudo apt install ./sftp-commander_0.7.0-1.ubuntu24.04_amd64.deb    # Ubuntu 24.04, Mint 22
+sudo apt install ./sftp-commander_0.8.0-1.deb13_amd64.deb         # Debian 13
+sudo apt install ./sftp-commander_0.8.0-1.ubuntu24.04_amd64.deb    # Ubuntu 24.04, Mint 22
 ```
 
 apt pulls the dependencies. Remove it with `sudo apt remove sftp-commander`.

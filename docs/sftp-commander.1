@@ -1,5 +1,5 @@
 '\" t
-.TH SFTP-COMMANDER 1 "2026-11-24" "sftp-commander 0.7.0" "User Commands"
+.TH SFTP-COMMANDER 1 "2026-11-26" "sftp-commander 0.8.0" "User Commands"
 .SH NAME
 sftp-commander \- two-pane SFTP client in the style of WinSCP Commander
 .SH SYNOPSIS
@@ -75,16 +75,18 @@ Print the version and exit.
 .SH KEYS
 .TS
 l l.
-F5	Copy the selection to the other pane
-F4, Enter	Open or edit
+F4	Copy the selection to the other pane (asks first)
+F5, Ctrl+R	Refresh both panes
+Enter	Open or edit
+F1	About
 F2	Rename
 F7	New folder
 Shift+F4	New empty document
 F8, Delete	Delete
 Ctrl+F	Search in the current folder
+Letters	Jump to the first name starting with them
 Ctrl+Shift+C	Copy path
 Ctrl+T, Ctrl+W	New tab, close tab
-Ctrl+R	Refresh
 Ctrl+H	Show or hide hidden files
 Ctrl+L	Manage saved servers
 .TE
@@ -92,6 +94,9 @@ Ctrl+L	Manage saved servers
 .TP
 .I ~/.config/sftp-commander/servidores.ini
 Saved servers (never contains passwords).
+.TP
+.I ~/.config/sftp-commander/preferencias.ini
+Preferences, such as whether to ask before copying.
 .TP
 .I ~/.cache/sftp-commander/editar/
 Temporary copies of remote files being edited; removed on exit.

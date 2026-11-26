@@ -40,6 +40,13 @@ for s in 16 24 32 48 64 128 256; do
     install -Dm644 "data/icono-$s.png" "$DEST/share/icons/hicolor/${s}x${s}/apps/sftp-commander.png"
 done
 cp data/sftp-commander.ico "$DEST/"
+# la caché copiada no conoce el ícono propio: GTK no lo encontraría
+gtk4-update-icon-cache -q -f -t "$DEST/share/icons/hicolor"
+
+# textos propios de GTK y GLib en español ("Acerca de", "Créditos", diálogos de archivos)
+mkdir -p "$DEST/share/locale/es/LC_MESSAGES"
+cp "$PFX/share/locale/es/LC_MESSAGES/gtk40.mo" "$PFX/share/locale/es/LC_MESSAGES/glib20.mo" \
+   "$DEST/share/locale/es/LC_MESSAGES/"
 
 # Documentos
 cp LICENSE "$DEST/LICENSE.txt"

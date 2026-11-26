@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-11-26
+
+### Added
+- **About** window (F1 or the ☰ menu): version, author, link to the project and to Issues, and GTK/libssh versions for bug reports.
+- **☰ menu** at the right of the connection bar, with *Ask before copying*, hidden files and About.
+- **Drag and drop**: drag files from one pane to the other to copy them, or drop files from the system file manager (Explorer, Nautilus…) onto the server pane to upload them.
+- **Sort by column**: click *Name*, *Size*, *Modified* or *Permissions* to sort; click again to reverse. Folders always stay on top.
+- **Search button** (magnifier) next to each path, in addition to Ctrl+F.
+- **Type to jump**: typing letters in a pane selects the first name that starts with them (or contains them); repeating the same letter goes to the next one, like Windows Explorer.
+- Dragging one of several selected files carries the whole selection. Select several with Ctrl+click, Shift+click or Ctrl+A.
+- **Confirmation before copying**, with *Don't ask again* (re-enable it in the ☰ menu). Stored in `~/.config/sftp-commander/preferencias.ini`.
+- **Overwrite warning**: if something with the same name already exists in the destination, it always asks *Replace*, *Skip existing* or *Cancel* (Enter cancels).
+
+### Changed
+- **F5 refreshes** both panes, like a file manager (Ctrl+R still works). **F4 copies** to the other pane. Opening a file is Enter or double click.
+- The Windows build includes the Spanish translations of GTK and finds its own icon.
+
 ## [0.7.0] - 2026-11-24
 
 ### Added
@@ -80,4 +97,5 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 - First version: two panes (local and remote), host key verification with `~/.ssh/known_hosts`, authentication with keys, ssh-agent and password, recursive copy, delete, rename and new folder, with progress and cancel.
 
+[0.8.0]: https://github.com/reybendg/sftp-comander/releases/tag/v0.8.0
 [0.7.0]: https://github.com/reybendg/sftp-comander/releases/tag/v0.7.0

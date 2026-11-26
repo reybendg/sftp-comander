@@ -121,21 +121,41 @@ The same dialog appears if an operation fails because the connection is gone.
 
 | Action | Keys | Notes |
 |---|---|---|
-| Copy to the other pane | F5 | Uploads or downloads; folders are copied recursively. Existing files are overwritten without asking. |
+| Copy to the other pane | F4, or drag | Uploads or downloads; folders are copied recursively. See *Copying without overwriting by accident* |
+| Open / edit | Enter or double click | |
 | Rename | F2 | |
 | New folder | F7 | |
 | New empty document | Shift+F4 | Never overwrites an existing file |
 | Delete | F8 or Delete | Asks first; folders are deleted with all their content |
-| Refresh | Ctrl+R | |
+| Refresh | F5 or Ctrl+R | Both panes |
 | Hidden files | Ctrl+H | |
+| About | F1 | Version, author and project link |
 
-The right-click menu has the same actions. Right-clicking an empty area clears the selection, which is handy for *New folder*.
+The right-click menu has the same actions. Right-clicking an empty area clears the selection, which is handy for *New folder*. The ☰ button at the right of the connection bar has *Preguntar antes de copiar* (ask before copying), hidden files and *Acerca de* (About).
 
-Long copies show a progress bar and a *Cancelar* button in the status bar of that tab.
+Long copies show a progress bar and a *Cancelar* button in the status bar of that tab. When they finish, both panes are refreshed.
+
+### Copying without overwriting by accident
+
+- Before copying, a window shows what is uploaded or downloaded and where to. Tick *No volver a preguntar* (don't ask again) to copy directly; turn it back on in ☰ > *Preguntar antes de copiar*.
+- If something with the same name already exists in the destination, it **always** asks, even with the confirmation turned off: *Reemplazar* (replace), *Omitir existentes* (skip existing, copy only what is new) or *Cancelar*. Enter chooses *Cancelar*.
+
+### Drag and drop
+
+- Drag files or folders from one pane to the other to copy them. For several, select them with Ctrl+click, Shift+click or Ctrl+A and drag any of them: all of them go. Dragging an unselected row copies only that row.
+- Drop files from the system file manager (Windows Explorer, Nautilus, Dolphin…) onto the **server pane** to upload them to the remote folder shown.
+
+### Sorting
+
+Click a column title (*Nombre*, *Tamaño*, *Modificado*, *Permisos*) to sort by it; click again to reverse (largest first, or Z to A). The arrow next to the title shows the current order. ".." and folders always stay on top.
+
+### Jump to a file by typing
+
+With the focus on a pane, type the beginning of a name: the first one that starts with it is selected (`m` goes to the first with M; `my` to `my-notes.txt`). If none starts with it, it goes to the first that contains it. Letters typed within one second add up; repeating the same letter (`m`, `m`, `m`) moves to the next one starting with it, like Windows Explorer. The status bar shows what you typed.
 
 ### Search
 
-**Ctrl+F** (or *Buscar en esta carpeta* in the right-click menu) shows a search field in the active pane and filters the current folder as you type:
+**Ctrl+F**, the **magnifier** next to each pane's path or *Buscar en esta carpeta* in the right-click menu show a search field in the active pane and filters the current folder as you type:
 
 - it ignores upper and lower case: `log` finds `Servicio.LOG`;
 - `*` and `?` work as wildcards: `*.conf`, `backup-2026-??-*`;
@@ -150,7 +170,7 @@ It only searches the current folder, not subfolders.
 
 ### Open and edit remote files
 
-Double-click a remote file (or press Enter or F4):
+Double-click a remote file (or press Enter):
 
 1. It is downloaded to `~/.cache/sftp-commander/editar/<random>/`.
 2. It opens in a local app: for text, logs and configuration files, a graphical text editor; for images, an image viewer; otherwise the system default.

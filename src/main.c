@@ -17,7 +17,8 @@
 #include "sftp.h"
 #include "llavero.h"
 
-#define VERSION "0.7.0"
+#define VERSION "0.8.0"
+#define WEB_PROYECTO "https://github.com/reybendg/sftp-comander"
 
 /* ---------- elemento de la lista ---------- */
 
@@ -67,7 +68,11 @@ typedef struct {
     GtkCustomFilter   *filtro;     /* lo que se ve: filtrado por la búsqueda */
     char              *patron;     /* texto buscado, en minúsculas (casefold) */
     GtkMultiSelection *sel;        /* sobre el modelo filtrado: sus posiciones son las visibles */
-    GtkWidget         *marco, *titulo, *ruta, *vista, *menu, *buscar;
+    GtkSortListModel  *orden;      /* store ordenado según la columna elegida (entre store y filtro) */
+    GtkWidget         *marco, *titulo, *ruta, *vista, *menu, *buscar, *lupa;
+    GtkBitset         *sel_previa; /* selección al presionar el mouse: arrastrar varios sin perderla */
+    GString           *teclas;     /* letras tecleadas seguidas para saltar a un nombre */
+    gint64             teclas_t;   /* cuándo fue la última (µs) */
 } Panel;
 
 /* Una pestaña: conexión, paneles, estado y aviso "Conectando…" propios */
@@ -115,6 +120,8 @@ struct App {
     GPtrArray      *ediciones;                 /* archivos remotos abiertos para editar */
     GMenuModel     *menu_ctx;
     Panel          *panel_dialogo;
+    gboolean        confirmar_copia;           /* preguntar antes de copiar (preferencias.ini) */
+    Panel          *arrastre;                  /* panel desde el que se arrastra, mientras dura */
     /* opciones de línea de comandos */
     char           *op_destino, *op_identidad, *op_known, *op_captura, *op_salto;
     GtkWidget      *captura_widget, *gestor_win;   /* solo para las capturas de prueba */
@@ -180,6 +187,8 @@ static void sesion_unref(Sesion *s)
     for (Panel *p = &s->izq; p; p = p == &s->izq ? &s->der : NULL) {
         g_free(p->cwd);
         g_free(p->patron);
+        g_clear_pointer(&p->sel_previa, gtk_bitset_unref);
+        if (p->teclas) g_string_free(p->teclas, TRUE);
         g_clear_object(&p->store);
         g_clear_object(&p->sel);
     }
@@ -404,9 +413,10 @@ static void op_hilo(GTask *t, gpointer src, gpointer datos, GCancellable *cc)
             if (!ok) break;
         }
         break;
-    case OP_COPIAR:   /* remoto = el origen es el panel remoto */
+    case OP_COPIAR:   /* remoto = el origen es el panel remoto; sin ruta, los nombres son rutas completas */
         for (guint i = 0; i < op->nombres->len; i++) {
-            char *r = ruta_unir(op->ruta, g_ptr_array_index(op->nombres, i));
+            const char *n = g_ptr_array_index(op->nombres, i);
+            char *r = op->ruta ? ruta_unir(op->ruta, n) : g_strdup(n);
             gboolean ok = op->remoto ? con_bajar(c, r, op->ruta2, progreso, s, &op->err)
                                      : con_subir(c, r, op->ruta2, progreso, s, &op->err);
             g_free(r);
@@ -668,6 +678,41 @@ static void col_bind(GtkSignalListItemFactory *f, GObject *o, gpointer d)
     }
     gtk_label_set_text(GTK_LABEL(w), t ? t : "");
     g_free(t);
+}
+
+/* ---------- orden ---------- */
+
+/* Siempre primero "..", después las carpetas y después los archivos (aunque el orden sea descendente) */
+static int orden_carpetas(gconstpointer pa, gconstpointer pb, gpointer d)
+{
+    (void)d;
+    const FiItem *a = pa, *b = pb;
+    gboolean pa_ = strcmp(a->nombre, "..") == 0, pb_ = strcmp(b->nombre, "..") == 0;
+    if (pa_ != pb_) return pa_ ? GTK_ORDERING_SMALLER : GTK_ORDERING_LARGER;
+    if (a->es_dir != b->es_dir) return a->es_dir ? GTK_ORDERING_SMALLER : GTK_ORDERING_LARGER;
+    return GTK_ORDERING_EQUAL;
+}
+
+static int cmp_num(guint64 x, guint64 y) { return x < y ? GTK_ORDERING_SMALLER : x > y ? GTK_ORDERING_LARGER : GTK_ORDERING_EQUAL; }
+
+/* Orden de una columna (al hacer clic en su título; otro clic lo invierte) */
+static int orden_columna(gconstpointer pa, gconstpointer pb, gpointer d)
+{
+    const FiItem *a = pa, *b = pb;
+    int r = GTK_ORDERING_EQUAL;
+    switch (GPOINTER_TO_INT(d)) {
+    case COL_TAM:   r = cmp_num(a->tam, b->tam); break;
+    case COL_FECHA: r = cmp_num((guint64)a->mtime, (guint64)b->mtime); break;
+    case COL_PERM:  r = cmp_num(a->permisos & 07777, b->permisos & 07777); break;
+    default: break;
+    }
+    if (r == GTK_ORDERING_EQUAL) {   /* a igual valor, por nombre */
+        char *x = g_utf8_casefold(a->nombre, -1), *y = g_utf8_casefold(b->nombre, -1);
+        int c = g_utf8_collate(x, y);
+        g_free(x); g_free(y);
+        r = c < 0 ? GTK_ORDERING_SMALLER : c > 0 ? GTK_ORDERING_LARGER : GTK_ORDERING_EQUAL;
+    }
+    return r;
 }
 
 /* ---------- diálogo para pedir un texto ---------- */
@@ -981,6 +1026,201 @@ static void accion_abrir(App *a)
     g_object_unref(it);
 }
 
+/* ---------- copiar: confirmar y no pisar sin avisar ---------- */
+
+static void preferencias_guardar(App *a);
+
+/* ¿Hay algo con ese nombre en la carpeta del panel? (lo que se listó, sin filtro de búsqueda) */
+static gboolean existe_en(Panel *p, const char *nombre)
+{
+    GListModel *m = G_LIST_MODEL(p->store);
+    gboolean r = FALSE;
+    for (guint i = 0, n = g_list_model_get_n_items(m); i < n && !r; i++) {
+        FiItem *it = g_list_model_get_item(m, i);
+#ifdef _WIN32
+        /* en Windows los nombres locales no distinguen mayúsculas */
+        r = !p->remoto ? g_ascii_strcasecmp(it->nombre, nombre) == 0 : strcmp(it->nombre, nombre) == 0;
+#else
+        r = strcmp(it->nombre, nombre) == 0;
+#endif
+        g_object_unref(it);
+    }
+    return r;
+}
+
+static char *nombres_texto(GPtrArray *v, guint max)
+{
+    GString *t = g_string_new(NULL);
+    for (guint i = 0; i < v->len && i < max; i++) {
+        char *b = g_path_get_basename(g_ptr_array_index(v, i));
+        g_string_append_printf(t, "%s\n", b);
+        g_free(b);
+    }
+    if (v->len > max) g_string_append_printf(t, "… y %u más\n", v->len - max);
+    return g_string_free(t, FALSE);
+}
+
+static void copiar_lanzar(Op *op)
+{
+    estado(op->s, "%s %u elemento(s)…", op->remoto ? "Bajando" : "Subiendo", op->nombres->len);
+    lanzar(op);
+}
+
+/* Ventana "¿Copiar?" con "No volver a preguntar" */
+typedef struct { App *a; Op *op; GtkWidget *win, *check; } Confirmacion;
+
+static void confirmacion_free(gpointer d)
+{
+    Confirmacion *c = d;
+    if (c->op) op_free(c->op);   /* se cerró sin copiar */
+    g_free(c);
+}
+
+static void confirmacion_ok(GtkWidget *w, gpointer d)
+{
+    (void)w;
+    Confirmacion *c = d;
+    if (gtk_check_button_get_active(GTK_CHECK_BUTTON(c->check))) {
+        c->a->confirmar_copia = FALSE;
+        preferencias_guardar(c->a);
+        GAction *ac = g_action_map_lookup_action(G_ACTION_MAP(c->a->win), "confirmar-copia");
+        if (ac) g_simple_action_set_state(G_SIMPLE_ACTION(ac), g_variant_new_boolean(FALSE));
+    }
+    Op *op = c->op;
+    c->op = NULL;
+    gtk_window_destroy(GTK_WINDOW(c->win));
+    copiar_lanzar(op);
+}
+
+static void confirmacion_cancelar(GtkWidget *w, gpointer d)
+{
+    (void)w;
+    gtk_window_destroy(GTK_WINDOW(((Confirmacion *)d)->win));
+}
+
+static void confirmar_copia(App *a, Op *op)
+{
+    Confirmacion *c = g_new0(Confirmacion, 1);
+    c->a = a;
+    c->op = op;
+    c->win = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(c->win), op->remoto ? "Bajar" : "Subir");
+    gtk_window_set_transient_for(GTK_WINDOW(c->win), GTK_WINDOW(a->win));
+    gtk_window_set_modal(GTK_WINDOW(c->win), TRUE);
+    gtk_window_set_resizable(GTK_WINDOW(c->win), FALSE);
+    g_object_set_data_full(G_OBJECT(c->win), "confirmacion", c, confirmacion_free);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(box, 16); gtk_widget_set_margin_bottom(box, 16);
+    gtk_widget_set_margin_start(box, 18); gtk_widget_set_margin_end(box, 18);
+    char *tit = g_strdup_printf(op->remoto ? "¿Bajar %u elemento(s) a este equipo?" : "¿Subir %u elemento(s) al servidor?",
+                                op->nombres->len);
+    GtkWidget *l1 = gtk_label_new(tit);
+    gtk_widget_add_css_class(l1, "titulo-panel");
+    gtk_label_set_xalign(GTK_LABEL(l1), 0);
+    char *lista = nombres_texto(op->nombres, 8);
+    char *det = g_strdup_printf("%sDestino: %s", lista, op->ruta2);
+    GtkWidget *l2 = gtk_label_new(det);
+    gtk_label_set_xalign(GTK_LABEL(l2), 0);
+    gtk_label_set_ellipsize(GTK_LABEL(l2), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_max_width_chars(GTK_LABEL(l2), 60);
+    c->check = gtk_check_button_new_with_label("No volver a preguntar (se reactiva en el menú, arriba a la derecha)");
+    GtkWidget *botones = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(botones, GTK_ALIGN_END);
+    GtkWidget *cancelar = gtk_button_new_with_label("Cancelar");
+    GtkWidget *ok = gtk_button_new_with_label(op->remoto ? "Bajar" : "Subir");
+    gtk_widget_add_css_class(ok, "suggested-action");
+    g_signal_connect(cancelar, "clicked", G_CALLBACK(confirmacion_cancelar), c);
+    g_signal_connect(ok, "clicked", G_CALLBACK(confirmacion_ok), c);
+    gtk_box_append(GTK_BOX(botones), cancelar);
+    gtk_box_append(GTK_BOX(botones), ok);
+    gtk_box_append(GTK_BOX(box), l1);
+    gtk_box_append(GTK_BOX(box), l2);
+    gtk_box_append(GTK_BOX(box), c->check);
+    gtk_box_append(GTK_BOX(box), botones);
+    gtk_window_set_child(GTK_WINDOW(c->win), box);
+    gtk_window_set_default_widget(GTK_WINDOW(c->win), ok);
+    cerrar_con_escape(c->win);
+    gtk_window_present(GTK_WINDOW(c->win));
+    gtk_widget_grab_focus(ok);
+    if (g_getenv("SFTPC_DEMO")) {
+        g_print("CONFIRMAR: %s %u elemento(s) a %s\n", op->remoto ? "bajar" : "subir", op->nombres->len, op->ruta2);
+        if (g_strcmp0(g_getenv("SFTPC_DEMO"), "confirmar") == 0) a->captura_widget = c->win;
+    }
+    g_free(tit); g_free(lista); g_free(det);
+}
+
+typedef struct { App *a; Op *op; GPtrArray *existen; } Choque;
+
+static void choque_respuesta(GObject *src, GAsyncResult *res, gpointer d)
+{
+    Choque *ch = d;
+    int r = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, NULL);
+    Op *op = ch->op;
+    if (r == 1) {   /* omitir los que ya existen */
+        for (guint i = 0; i < ch->existen->len; i++)
+            for (guint j = 0; j < op->nombres->len; j++) {
+                char *b = g_path_get_basename(g_ptr_array_index(op->nombres, j));
+                gboolean igual = strcmp(b, g_ptr_array_index(ch->existen, i)) == 0;
+                g_free(b);
+                if (igual) { g_ptr_array_remove_index(op->nombres, j); break; }
+            }
+        if (op->nombres->len == 0) { estado(op->s, "Nada que copiar: ya existen todos"); op_free(op); }
+        else copiar_lanzar(op);
+    } else if (r == 2) {
+        copiar_lanzar(op);   /* reemplazar: ya se confirmó aquí, no se pregunta de nuevo */
+    } else {
+        estado(op->s, "Copia cancelada");
+        op_free(op);
+    }
+    g_ptr_array_unref(ch->existen);
+    g_free(ch);
+}
+
+/* Copia "nombres" (relativos a ruta_origen, o rutas completas si es NULL) a la carpeta del panel d.
+ * Si algo ya existe en el destino, pregunta siempre; si no, pregunta según la preferencia. */
+static void copiar_iniciar(Sesion *s, Panel *d, GPtrArray *nombres, const char *ruta_origen, gboolean desde_remoto)
+{
+    App *a = s->app;
+    if (!s->con || !d->cwd) { estado(s, "Conéctate a un servidor primero"); g_ptr_array_unref(nombres); return; }
+    if (nombres->len == 0) { estado(s, "Selecciona qué copiar"); g_ptr_array_unref(nombres); return; }
+    if (s->ocupado) { estado(s, "Espera a que termine la operación en curso"); g_ptr_array_unref(nombres); return; }
+    Op *op = op_nueva(s, OP_COPIAR);
+    op->remoto = desde_remoto;
+    op->ruta = g_strdup(ruta_origen);
+    op->ruta2 = g_strdup(d->cwd);
+    op->nombres = nombres;
+
+    GPtrArray *existen = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < nombres->len; i++) {
+        char *b = g_path_get_basename(g_ptr_array_index(nombres, i));
+        if (existe_en(d, b)) g_ptr_array_add(existen, b);
+        else g_free(b);
+    }
+    if (existen->len > 0) {
+        char *lista = nombres_texto(existen, 10);
+        char *det = g_strdup_printf("%s\nEn %s ya hay elementos con el mismo nombre. "
+                                    "Reemplazar los sobrescribe (en las carpetas, los archivos que coincidan).",
+                                    lista, d->cwd);
+        GtkAlertDialog *dlg = gtk_alert_dialog_new("¿Reemplazar %u elemento(s) que ya existen?", existen->len);
+        gtk_alert_dialog_set_detail(dlg, det);
+        const char *botones[] = { "Cancelar", "Omitir existentes", "Reemplazar", NULL };
+        gtk_alert_dialog_set_buttons(dlg, botones);
+        gtk_alert_dialog_set_cancel_button(dlg, 0);
+        gtk_alert_dialog_set_default_button(dlg, 0);   /* Enter no pisa nada */
+        Choque *ch = g_new0(Choque, 1);
+        ch->a = a; ch->op = op; ch->existen = existen;
+        if (g_getenv("SFTPC_DEMO")) g_print("CONFLICTO: %u ya existen: %s", existen->len, lista);
+        gtk_alert_dialog_choose(dlg, GTK_WINDOW(a->win), NULL, choque_respuesta, ch);
+        g_object_unref(dlg);
+        g_free(lista); g_free(det);
+        return;
+    }
+    g_ptr_array_unref(existen);
+    if (a->confirmar_copia) confirmar_copia(a, op);
+    else copiar_lanzar(op);
+}
+
 /* ---------- acciones ---------- */
 
 static void accion_copiar(App *a)
@@ -988,15 +1228,7 @@ static void accion_copiar(App *a)
     Sesion *s = a->s;
     Panel *o = s->activo, *d = otro_panel(s, o);
     if (!s->con || !d->cwd || !o->cwd) { estado(s, "Conéctate a un servidor primero"); return; }
-    GPtrArray *sel = panel_seleccion(o);
-    if (sel->len == 0) { estado(s, "Selecciona qué copiar"); g_ptr_array_unref(sel); return; }
-    Op *op = op_nueva(s, OP_COPIAR);
-    op->remoto = o->remoto;
-    op->ruta = g_strdup(o->cwd);
-    op->ruta2 = g_strdup(d->cwd);
-    op->nombres = sel;
-    estado(s, "%s %u elemento(s)…", o->remoto ? "Bajando" : "Subiendo", sel->len);
-    lanzar(op);
+    copiar_iniciar(s, d, panel_seleccion(o), o->cwd, o->remoto);
 }
 
 static void crear_cb(App *a, const char *texto, gpointer d)
@@ -1140,6 +1372,89 @@ static void accion_nueva_pestana(App *a)
 
 static void accion_cerrar_pestana(App *a) { cerrar_sesion(a->s); }
 
+/* ---------- preferencias (~/.config/sftp-commander/preferencias.ini) ---------- */
+
+static char *ruta_preferencias(void)
+{
+    return g_build_filename(g_get_user_config_dir(), "sftp-commander", "preferencias.ini", NULL);
+}
+
+static void preferencias_cargar(App *a)
+{
+    GKeyFile *k = g_key_file_new();
+    char *r = ruta_preferencias();
+    a->confirmar_copia = TRUE;   /* por defecto se pregunta */
+    if (g_key_file_load_from_file(k, r, G_KEY_FILE_NONE, NULL)) {
+        GError *e = NULL;
+        gboolean v = g_key_file_get_boolean(k, "general", "confirmar_copia", &e);
+        if (!e) a->confirmar_copia = v;
+        g_clear_error(&e);
+    }
+    g_free(r);
+    g_key_file_free(k);
+}
+
+static void preferencias_guardar(App *a)
+{
+    GKeyFile *k = g_key_file_new();
+    char *r = ruta_preferencias();
+    g_key_file_load_from_file(k, r, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    g_key_file_set_boolean(k, "general", "confirmar_copia", a->confirmar_copia);
+    char *dir = g_path_get_dirname(r);
+    g_mkdir_with_parents(dir, 0700);
+    g_key_file_save_to_file(k, r, NULL);
+    g_free(dir);
+    g_free(r);
+    g_key_file_free(k);
+}
+
+/* Menú ☰ > "Preguntar antes de copiar" */
+static void act_confirmar_cambio(GSimpleAction *x, GVariant *v, gpointer d)
+{
+    App *a = d;
+    g_simple_action_set_state(x, v);
+    a->confirmar_copia = g_variant_get_boolean(v);
+    preferencias_guardar(a);
+    estado(a->s, a->confirmar_copia ? "Se preguntará antes de copiar" : "Se copiará sin preguntar (salvo si algo ya existe)");
+}
+
+/* ---------- Acerca de ---------- */
+
+static void accion_acerca(App *a)
+{
+    const char *autores[] = { "David G https://github.com/reybendg", NULL };
+    GtkIconTheme *tema = gtk_icon_theme_get_for_display(gtk_widget_get_display(a->win));
+    char *sistema = g_strdup_printf("SFTP Commander %s\nGTK %u.%u.%u\nlibssh %s\nGLib %u.%u.%u",
+                                    VERSION, gtk_get_major_version(), gtk_get_minor_version(),
+                                    gtk_get_micro_version(), con_version_libssh(),
+                                    glib_major_version, glib_minor_version, glib_micro_version);
+    GtkWidget *dlg = gtk_about_dialog_new();
+    GtkAboutDialog *ad = GTK_ABOUT_DIALOG(dlg);
+    gtk_about_dialog_set_program_name(ad, "SFTP Commander");
+    gtk_about_dialog_set_version(ad, VERSION);
+    gtk_about_dialog_set_logo_icon_name(ad, gtk_icon_theme_has_icon(tema, "sftp-commander")
+                                            ? "sftp-commander" : "folder-remote");
+    gtk_about_dialog_set_comments(ad, "Cliente SFTP de dos paneles para Linux y Windows, "
+                                      "al estilo del modo Commander de WinSCP.");
+    gtk_about_dialog_set_website(ad, WEB_PROYECTO);
+    gtk_about_dialog_set_website_label(ad, "Proyecto en GitHub");
+    gtk_about_dialog_set_authors(ad, autores);
+    gtk_about_dialog_set_copyright(ad, "© 2026 David G");
+    gtk_about_dialog_set_license_type(ad, GTK_LICENSE_GPL_3_0);
+    gtk_about_dialog_set_system_information(ad, sistema);
+    gtk_about_dialog_add_credit_section(ad, "Reportar un error o pedir una función",
+                                        (const char *[]){ "Issues en GitHub " WEB_PROYECTO "/issues", NULL });
+    gtk_window_set_transient_for(GTK_WINDOW(dlg), GTK_WINDOW(a->win));
+    gtk_window_set_modal(GTK_WINDOW(dlg), TRUE);
+    gtk_window_present(GTK_WINDOW(dlg));
+    if (g_getenv("SFTPC_DEMO")) {
+        g_print("ACERCA: SFTP Commander %s · %s\n", VERSION, WEB_PROYECTO);
+        g_print("ICONO PROPIO: %s\n", gtk_icon_theme_has_icon(tema, "sftp-commander") ? "sí" : "no");
+        if (g_strcmp0(g_getenv("SFTPC_DEMO"), "acerca") == 0) a->captura_widget = dlg;
+    }
+    g_free(sistema);
+}
+
 /* Acciones de ventana "win.*": las usan el menú contextual, los botones y los atajos */
 #define ACCION(n) \
     static void act_##n(GSimpleAction *x, GVariant *v, gpointer d) { (void)x; (void)v; accion_##n(d); }
@@ -1156,6 +1471,7 @@ ACCION(buscar)
 ACCION(copiar_ruta)
 ACCION(nueva_pestana)
 ACCION(cerrar_pestana)
+ACCION(acerca)
 
 static const GActionEntry ACCIONES[] = {
     { "abrir",          act_abrir,          NULL, NULL, NULL, { 0 } },
@@ -1171,28 +1487,32 @@ static const GActionEntry ACCIONES[] = {
     { "copiar-ruta",    act_copiar_ruta,    NULL, NULL, NULL, { 0 } },
     { "nueva-pestana",  act_nueva_pestana,  NULL, NULL, NULL, { 0 } },
     { "cerrar-pestana", act_cerrar_pestana, NULL, NULL, NULL, { 0 } },
+    { "acerca",         act_acerca,         NULL, NULL, NULL, { 0 } },
+    /* sin "activate": al activarla se invierte sola y llama a change_state */
+    { "confirmar-copia", NULL,              NULL, "true", act_confirmar_cambio, { 0 } },
 };
 
-static const struct { const char *accion; const char *teclas[2]; } ATAJOS[] = {
-    { "win.abrir",          { "F4", NULL } },
-    { "win.copiar",         { "F5", NULL } },
+/* Abrir/editar no tiene tecla de función: Enter o doble clic. F5 actualiza, como en los exploradores. */
+static const struct { const char *accion; const char *teclas[3]; } ATAJOS[] = {
+    { "win.copiar",         { "F4", NULL } },
     { "win.renombrar",      { "F2", NULL } },
     { "win.borrar",         { "F8", NULL } },
     { "win.mkdir",          { "F7", NULL } },
     { "win.nuevo-doc",      { "<Shift>F4", NULL } },
-    { "win.refrescar",      { "<Control>r", NULL } },
+    { "win.refrescar",      { "F5", "<Control>r", NULL } },
     { "win.ocultos",        { "<Control>h", NULL } },
     { "win.servidores",     { "<Control>l", NULL } },
     { "win.buscar",         { "<Control>f", NULL } },
     { "win.copiar-ruta",    { "<Control><Shift>c", NULL } },
     { "win.nueva-pestana",  { "<Control>t", NULL } },
     { "win.cerrar-pestana", { "<Control>w", NULL } },
+    { "win.acerca",         { "F1", NULL } },
 };
 
 static GMenuModel *crear_menu_contextual(void)
 {
     GMenu *m = g_menu_new(), *s1 = g_menu_new(), *s2 = g_menu_new(), *s3 = g_menu_new(), *s4 = g_menu_new();
-    g_menu_append(s1, "Abrir / editar", "win.abrir");
+    g_menu_append(s1, "Abrir / editar (Enter)", "win.abrir");
     g_menu_append(s1, "Copiar al otro panel", "win.copiar");
     g_menu_append(s1, "Renombrar", "win.renombrar");
     g_menu_append(s1, "Borrar", "win.borrar");
@@ -2828,6 +3148,178 @@ static void on_buscar_enter(GtkSearchEntry *e, gpointer d)
     gtk_widget_grab_focus(p->vista);
 }
 
+/* Lupa: abre o cierra la búsqueda de ese panel */
+static void on_lupa(GtkButton *b, gpointer d)
+{
+    (void)b;
+    Panel *p = d;
+    p->s->activo = p;
+    marcar_activo(p->s);
+    if (gtk_widget_get_visible(p->buscar)) { buscar_limpiar(p); gtk_widget_grab_focus(p->vista); }
+    else accion_buscar(p->s->app);
+}
+
+/* ---------- arrastrar y soltar ---------- */
+
+/* Fila (GtkListItem) bajo el punto x,y de la vista, o NULL */
+static GtkListItem *fila_en(Panel *p, double x, double y)
+{
+    for (GtkWidget *w = gtk_widget_pick(p->vista, x, y, GTK_PICK_DEFAULT); w && w != p->vista;
+         w = gtk_widget_get_parent(w)) {
+        GtkListItem *li = g_object_get_data(G_OBJECT(w), "li");
+        if (li) return li;
+    }
+    return NULL;
+}
+
+/* Al presionar el botón izquierdo se guarda la selección: el clic en una fila puede dejar solo esa
+ * seleccionada antes de que empiece el arrastre */
+static gboolean on_presion(GtkEventControllerLegacy *c, GdkEvent *ev, gpointer d)
+{
+    (void)c;
+    Panel *p = d;
+    if (gdk_event_get_event_type(ev) == GDK_BUTTON_PRESS && gdk_button_event_get_button(ev) == GDK_BUTTON_PRIMARY
+        && !(gdk_event_get_modifier_state(ev) & (GDK_CONTROL_MASK | GDK_SHIFT_MASK))) {
+        GtkBitset *bs = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(p->sel));
+        g_clear_pointer(&p->sel_previa, gtk_bitset_unref);
+        p->sel_previa = gtk_bitset_copy(bs);   /* copia: el modelo cambia el suyo en el lugar */
+        gtk_bitset_unref(bs);
+    }
+    return FALSE;   /* el clic sigue su curso normal */
+}
+
+/* Si se arrastra una fila que era parte de una selección de varias, se recupera la selección completa */
+static void arrastre_recuperar(Panel *p, guint pos)
+{
+    if (!p->sel_previa || gtk_bitset_get_size(p->sel_previa) < 2 || !gtk_bitset_contains(p->sel_previa, pos)) return;
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(p->sel));
+    if (gtk_bitset_get_maximum(p->sel_previa) >= n) return;   /* la lista cambió entre medio */
+    GtkBitset *todo = gtk_bitset_new_range(0, n);
+    gtk_selection_model_set_selection(GTK_SELECTION_MODEL(p->sel), p->sel_previa, todo);
+    gtk_bitset_unref(todo);
+}
+
+/* Salto por letras: teclear el comienzo de un nombre selecciona el primero que empiece así
+ * (si ninguno, el primero que lo contenga). Las letras seguidas (menos de 1 s) se suman;
+ * repetir la misma letra pasa al siguiente que empiece con ella, como en el Explorador. */
+static gboolean panel_saltar(Panel *p, gunichar c)
+{
+    gint64 ahora = g_get_monotonic_time();
+    if (!p->teclas) p->teclas = g_string_new(NULL);
+    if (ahora - p->teclas_t > G_USEC_PER_SEC) g_string_truncate(p->teclas, 0);
+    p->teclas_t = ahora;
+    g_string_append_unichar(p->teclas, c);
+    char *pref = g_utf8_casefold(p->teclas->str, -1);
+    GListModel *m = G_LIST_MODEL(p->sel);
+    guint n = g_list_model_get_n_items(m), desde = 0;
+    /* ¿todas las letras iguales ("mmm")? entonces se busca "m" a partir del actual */
+    gboolean repetida = g_utf8_strlen(pref, -1) > 1;
+    gunichar c0 = g_utf8_get_char(pref);
+    for (const char *q = pref; *q && repetida; q = g_utf8_next_char(q))
+        if (g_utf8_get_char(q) != c0) repetida = FALSE;
+    if (repetida) {
+        *g_utf8_next_char(pref) = '\0';
+        GtkBitset *bs = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(p->sel));
+        if (!gtk_bitset_is_empty(bs)) desde = gtk_bitset_get_minimum(bs) + 1;
+        gtk_bitset_unref(bs);
+    }
+    guint hallado = GTK_INVALID_LIST_POSITION;
+    for (int pasada = 0; pasada < 2 && hallado == GTK_INVALID_LIST_POSITION; pasada++) {
+        if (pasada == 1 && repetida) break;   /* "mm" no busca por contenido */
+        for (guint i = 0; i < n && hallado == GTK_INVALID_LIST_POSITION; i++) {
+            guint k = n ? (desde + i) % n : 0;
+            FiItem *it = g_list_model_get_item(m, k);
+            if (strcmp(it->nombre, "..") != 0) {
+                char *nom = g_utf8_casefold(it->nombre, -1);
+                if (pasada == 0 ? g_str_has_prefix(nom, pref) : strstr(nom, pref) != NULL) hallado = k;
+                g_free(nom);
+            }
+            g_object_unref(it);
+        }
+    }
+    if (hallado != GTK_INVALID_LIST_POSITION) {
+        gtk_column_view_scroll_to(GTK_COLUMN_VIEW(p->vista), hallado, NULL,
+                                  GTK_LIST_SCROLL_FOCUS | GTK_LIST_SCROLL_SELECT, NULL);
+        estado(p->s, "Ir a: %s", p->teclas->str);
+    } else {
+        estado(p->s, "Ningún nombre coincide con \"%s\" (Ctrl+F busca en toda la carpeta)", p->teclas->str);
+    }
+    g_free(pref);
+    return hallado != GTK_INVALID_LIST_POSITION;
+}
+
+static gboolean on_tecla(GtkEventControllerKey *k, guint kv, guint code, GdkModifierType st, gpointer d)
+{
+    (void)k; (void)code;
+    Panel *p = d;
+    if (st & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) return FALSE;
+    gunichar c = gdk_keyval_to_unicode(kv);
+    if (!c || !g_unichar_isprint(c)) return FALSE;
+    /* el espacio solo cuenta en medio de un nombre ("mis docs") */
+    if (c == ' ' && (!p->teclas || p->teclas->len == 0 || g_get_monotonic_time() - p->teclas_t > G_USEC_PER_SEC))
+        return FALSE;
+    panel_saltar(p, c);
+    return TRUE;
+}
+
+/* Empieza un arrastre: lleva la selección de este panel (si se arrastra una fila sin seleccionar, solo esa) */
+static GdkContentProvider *on_arrastre_preparar(GtkDragSource *src, double x, double y, gpointer d)
+{
+    (void)src;
+    Panel *p = d;
+    if (!p->cwd || p->s->ocupado || (p->remoto && !p->s->con)) return NULL;
+    GtkListItem *li = fila_en(p, x, y);
+    if (!li) return NULL;
+    FiItem *it = gtk_list_item_get_item(li);
+    guint pos = gtk_list_item_get_position(li);
+    if (!it || strcmp(it->nombre, "..") == 0 || pos == GTK_INVALID_LIST_POSITION) return NULL;
+    GtkSelectionModel *sel = GTK_SELECTION_MODEL(p->sel);
+    arrastre_recuperar(p, pos);
+    if (!gtk_selection_model_is_selected(sel, pos)) gtk_selection_model_select_item(sel, pos, TRUE);
+    p->s->activo = p;
+    marcar_activo(p->s);
+    p->s->app->arrastre = p;
+    /* adentro de la app basta una marca: el destino lee la selección del panel de origen */
+    return gdk_content_provider_new_typed(G_TYPE_STRING, "sftp-commander");
+}
+
+static void on_arrastre_fin(GtkDragSource *src, GdkDrag *drag, gboolean borrar, gpointer d)
+{
+    (void)src; (void)drag; (void)borrar;
+    Panel *p = d;
+    if (p->s->app->arrastre == p) p->s->app->arrastre = NULL;
+}
+
+/* Soltar: desde el otro panel (copia) o archivos del explorador del sistema (solo al panel remoto: sube) */
+static gboolean on_soltar(GtkDropTarget *t, const GValue *v, double x, double y, gpointer d)
+{
+    (void)t; (void)x; (void)y;
+    Panel *p = d;
+    Sesion *s = p->s;
+    App *a = s->app;
+    if (G_VALUE_HOLDS(v, G_TYPE_STRING)) {
+        Panel *o = a->arrastre;
+        if (!o || o->s != s || o == p) return FALSE;   /* sobre sí mismo o desde otra pestaña: nada */
+        copiar_iniciar(s, p, panel_seleccion(o), o->cwd, o->remoto);
+        return TRUE;
+    }
+    if (G_VALUE_HOLDS(v, GDK_TYPE_FILE_LIST)) {
+        if (!p->remoto) { estado(s, "Suelta los archivos en el panel del servidor para subirlos"); return FALSE; }
+        GSList *l = gdk_file_list_get_files(g_value_get_boxed(v));
+        GPtrArray *rutas = g_ptr_array_new_with_free_func(g_free);
+        for (GSList *i = l; i; i = i->next) {
+            char *r = g_file_get_path(i->data);
+            if (r) g_ptr_array_add(rutas, r);
+        }
+        g_slist_free(l);
+        s->activo = p;
+        marcar_activo(s);
+        copiar_iniciar(s, p, rutas, NULL, FALSE);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 #ifdef _WIN32
 static void on_unidad(GtkButton *b, gpointer d)
 {
@@ -2861,25 +3353,60 @@ static GtkWidget *panel_crear(Sesion *s, Panel *p, gboolean remoto)
     p->s = s;
     p->remoto = remoto;
     p->store = g_list_store_new(FI_TYPE_ITEM);
+    /* store -> orden (columna elegida) -> filtro (búsqueda) -> selección */
+    p->orden = gtk_sort_list_model_new(G_LIST_MODEL(g_object_ref(p->store)), NULL);
     p->filtro = gtk_custom_filter_new(filtro_fn, p, NULL);
-    GtkFilterListModel *fm = gtk_filter_list_model_new(G_LIST_MODEL(g_object_ref(p->store)),
+    GtkFilterListModel *fm = gtk_filter_list_model_new(G_LIST_MODEL(g_object_ref(p->orden)),
                                                        GTK_FILTER(p->filtro));   /* fm se queda con filtro */
     p->sel = gtk_multi_selection_new(G_LIST_MODEL(fm));
     p->vista = gtk_column_view_new(GTK_SELECTION_MODEL(g_object_ref(p->sel)));
     gtk_column_view_set_show_column_separators(GTK_COLUMN_VIEW(p->vista), TRUE);
 
     static const char *titulos[N_COLS] = { "Nombre", "Tamaño", "Modificado", "Permisos" };
+    GtkColumnViewColumn *col_nombre = NULL;
     for (int i = 0; i < N_COLS; i++) {
         GtkListItemFactory *f = gtk_signal_list_item_factory_new();
         g_signal_connect(f, "setup", G_CALLBACK(col_setup), GINT_TO_POINTER(i));
         g_signal_connect(f, "bind", G_CALLBACK(col_bind), GINT_TO_POINTER(i));
         GtkColumnViewColumn *col = gtk_column_view_column_new(titulos[i], f);
         gtk_column_view_column_set_resizable(col, TRUE);
-        if (i == COL_NOMBRE) gtk_column_view_column_set_expand(col, TRUE);
+        /* clic en el título: ordena por esa columna; otro clic invierte el orden */
+        GtkSorter *so = GTK_SORTER(gtk_custom_sorter_new(orden_columna, GINT_TO_POINTER(i), NULL));
+        gtk_column_view_column_set_sorter(col, so);
+        g_object_unref(so);
+        if (i == COL_NOMBRE) { gtk_column_view_column_set_expand(col, TRUE); col_nombre = col; }
         gtk_column_view_append_column(GTK_COLUMN_VIEW(p->vista), col);
         g_object_unref(col);
     }
+    /* ".." y carpetas primero, después lo que diga la columna */
+    GtkMultiSorter *ms = gtk_multi_sorter_new();
+    gtk_multi_sorter_append(ms, GTK_SORTER(gtk_custom_sorter_new(orden_carpetas, NULL, NULL)));
+    gtk_multi_sorter_append(ms, g_object_ref(gtk_column_view_get_sorter(GTK_COLUMN_VIEW(p->vista))));
+    gtk_sort_list_model_set_sorter(p->orden, GTK_SORTER(ms));
+    g_object_unref(ms);
+    gtk_column_view_sort_by_column(GTK_COLUMN_VIEW(p->vista), col_nombre, GTK_SORT_ASCENDING);
     g_signal_connect(p->vista, "activate", G_CALLBACK(on_fila_activada), p);
+
+    /* arrastrar desde este panel y soltar en el otro, o soltar archivos del explorador */
+    GtkDragSource *ds = gtk_drag_source_new();
+    gtk_drag_source_set_actions(ds, GDK_ACTION_COPY);
+    g_signal_connect(ds, "prepare", G_CALLBACK(on_arrastre_preparar), p);
+    g_signal_connect(ds, "drag-end", G_CALLBACK(on_arrastre_fin), p);
+    gtk_widget_add_controller(p->vista, GTK_EVENT_CONTROLLER(ds));
+    GtkDropTarget *dt = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY);
+    gtk_drop_target_set_gtypes(dt, (GType[]){ GDK_TYPE_FILE_LIST, G_TYPE_STRING }, 2);
+    g_signal_connect(dt, "drop", G_CALLBACK(on_soltar), p);
+    gtk_widget_add_controller(p->vista, GTK_EVENT_CONTROLLER(dt));
+    GtkEventController *pres = gtk_event_controller_legacy_new();
+    gtk_event_controller_set_propagation_phase(pres, GTK_PHASE_CAPTURE);
+    g_signal_connect(pres, "event", G_CALLBACK(on_presion), p);
+    gtk_widget_add_controller(p->vista, pres);
+
+    /* teclear letras en el panel salta al archivo que empiece así */
+    GtkEventController *letras = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(letras, GTK_PHASE_CAPTURE);
+    g_signal_connect(letras, "key-pressed", G_CALLBACK(on_tecla), p);
+    gtk_widget_add_controller(p->vista, letras);
 
     GtkEventController *foco = gtk_event_controller_focus_new();
     g_signal_connect(foco, "enter", G_CALLBACK(on_foco), p);
@@ -2919,21 +3446,24 @@ static GtkWidget *panel_crear(Sesion *s, Panel *p, gboolean remoto)
     p->marco = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class(p->marco, "panel");
     gtk_box_append(GTK_BOX(p->marco), p->titulo);
+    /* fila de la ruta: [Unidad ▾ (Windows, local)] ruta [lupa] */
+    GtkWidget *fila = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 #ifdef _WIN32
     if (!remoto) {
-        /* Windows: botón con las unidades (C:\, D:\…) a la izquierda de la ruta */
-        GtkWidget *fila = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
         GtkWidget *mb = gtk_menu_button_new();
         gtk_menu_button_set_label(GTK_MENU_BUTTON(mb), "Unidad");
         gtk_widget_set_tooltip_text(mb, "Unidades");
         gtk_menu_button_set_create_popup_func(GTK_MENU_BUTTON(mb), unidades_popup, p, NULL);
-        gtk_widget_set_hexpand(p->ruta, TRUE);
         gtk_box_append(GTK_BOX(fila), mb);
-        gtk_box_append(GTK_BOX(fila), p->ruta);
-        gtk_box_append(GTK_BOX(p->marco), fila);
-    } else
+    }
 #endif
-    gtk_box_append(GTK_BOX(p->marco), p->ruta);
+    gtk_widget_set_hexpand(p->ruta, TRUE);
+    gtk_box_append(GTK_BOX(fila), p->ruta);
+    p->lupa = gtk_button_new_from_icon_name("system-search-symbolic");
+    gtk_widget_set_tooltip_text(p->lupa, "Buscar en esta carpeta (Ctrl+F)");
+    g_signal_connect(p->lupa, "clicked", G_CALLBACK(on_lupa), p);
+    gtk_box_append(GTK_BOX(fila), p->lupa);
+    gtk_box_append(GTK_BOX(p->marco), fila);
     gtk_box_append(GTK_BOX(p->marco), p->buscar);
     gtk_box_append(GTK_BOX(p->marco), scroll);
     return p->marco;
@@ -3051,6 +3581,84 @@ static void demo(App *a)
             g_object_unref(it);
             accion_copiar_ruta(a);
         }
+    } else if (g_strcmp0(m, "acerca") == 0) {
+        accion_acerca(a);
+    } else if (g_strcmp0(m, "ordenar") == 0) {
+        /* clic en "Tamaño" dos veces: de mayor a menor; ".." y carpetas siguen arriba */
+        GListModel *cols = gtk_column_view_get_columns(GTK_COLUMN_VIEW(s->der.vista));
+        GtkColumnViewColumn *c = g_list_model_get_item(cols, COL_TAM);
+        gtk_column_view_sort_by_column(GTK_COLUMN_VIEW(s->der.vista), c, GTK_SORT_DESCENDING);
+        g_object_unref(c);
+        GString *t = g_string_new("ORDEN:");
+        GListModel *m2 = G_LIST_MODEL(s->der.sel);
+        for (guint i = 0; i < g_list_model_get_n_items(m2); i++) {
+            FiItem *it = g_list_model_get_item(m2, i);
+            g_string_append_printf(t, " %s", it->nombre);
+            g_object_unref(it);
+        }
+        g_print("%s\n", t->str);
+        g_string_free(t, TRUE);
+    } else if (g_strcmp0(m, "conflicto") == 0 || g_strcmp0(m, "confirmar") == 0) {
+        /* copia nota.txt del remoto a una carpeta local: la misma (ya existe) o una vacía */
+        char *tmp = NULL;
+        if (g_strcmp0(m, "conflicto") == 0) panel_ir(&s->izq, s->der.cwd);
+        else { tmp = g_dir_make_tmp("sftpc-XXXXXX", NULL); panel_ir(&s->izq, tmp); }
+        guint pos;
+        FiItem *it = buscar_item(&s->der, "nota.txt", &pos);
+        if (it) {
+            s->activo = &s->der;
+            gtk_selection_model_select_item(GTK_SELECTION_MODEL(s->der.sel), pos, TRUE);
+            g_object_unref(it);
+            accion_copiar(a);
+        }
+        if (tmp) { g_rmdir(tmp); g_free(tmp); }
+    } else if (g_strcmp0(m, "saltar") == 0) {
+        /* teclear "no", luego "grande" (por contenido) y "zz" (misma letra) */
+        Panel *p = &s->der;
+        const char *pruebas[] = { "no", "grande", "zz", NULL };
+        GString *t = g_string_new("SALTO:");
+        for (int i = 0; pruebas[i]; i++) {
+            p->teclas_t = 0;   /* como si hubiera pasado más de 1 s */
+            for (const char *q = pruebas[i]; *q; q = g_utf8_next_char(q)) panel_saltar(p, g_utf8_get_char(q));
+            GPtrArray *sel = panel_seleccion(p);
+            g_string_append_printf(t, " %s=%s", pruebas[i], sel->len ? (char *)g_ptr_array_index(sel, 0) : "-");
+            g_ptr_array_unref(sel);
+        }
+        g_print("%s\n", t->str);
+        g_string_free(t, TRUE);
+    } else if (g_strcmp0(m, "varios") == 0) {
+        /* 3 seleccionados, clic sin Ctrl en uno (queda 1) y arrastre: deben volver los 3 */
+        Panel *p = &s->der;
+        GtkSelectionModel *sel = GTK_SELECTION_MODEL(p->sel);
+        gtk_selection_model_select_range(sel, 1, 3, TRUE);
+        g_clear_pointer(&p->sel_previa, gtk_bitset_unref);
+        GtkBitset *bs = gtk_selection_model_get_selection(sel);
+        p->sel_previa = gtk_bitset_copy(bs);
+        gtk_bitset_unref(bs);
+        gtk_selection_model_select_item(sel, 2, TRUE);
+        arrastre_recuperar(p, 2);
+        char *tmp = g_dir_make_tmp("sftpc-XXXXXX", NULL);
+        panel_ir(&s->izq, tmp);
+        s->activo = p;
+        accion_copiar(a);
+        g_rmdir(tmp);
+        g_free(tmp);
+    } else if (g_strcmp0(m, "soltar") == 0) {
+        /* como si se soltara un archivo del explorador sobre el panel remoto */
+        char *f = g_build_filename(g_get_tmp_dir(), "sftpc-soltar.txt", NULL);
+        g_file_set_contents(f, "soltado\n", -1, NULL);
+        GFile *gf = g_file_new_for_path(f);
+        GSList *l = g_slist_prepend(NULL, gf);
+        GdkFileList *fl = gdk_file_list_new_from_list(l);
+        GValue v = G_VALUE_INIT;
+        g_value_init(&v, GDK_TYPE_FILE_LIST);
+        g_value_take_boxed(&v, fl);
+        on_soltar(NULL, &v, 0, 0, &s->der);
+        g_value_unset(&v);
+        g_slist_free(l);
+        g_object_unref(gf);
+        g_remove(f);
+        g_free(f);
     }
 }
 
@@ -3116,8 +3724,8 @@ static Sesion *nueva_sesion(App *a)
     /* botones de acciones (actúan sobre la pestaña visible) */
     GtkWidget *acc = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     boton_accion(acc, "F2 Renombrar", "win.renombrar");
-    boton_accion(acc, "F4 Abrir", "win.abrir");
-    boton_accion(acc, "F5 Copiar", "win.copiar");
+    boton_accion(acc, "F4 Copiar", "win.copiar");
+    boton_accion(acc, "F5 Actualizar", "win.refrescar");
     boton_accion(acc, "F7 Nueva carpeta", "win.mkdir");
     boton_accion(acc, "Mayús+F4 Nuevo documento", "win.nuevo-doc");
     boton_accion(acc, "F8 Borrar", "win.borrar");
@@ -3187,7 +3795,10 @@ static void on_activar(GtkApplication *g, gpointer d)
     /* ícono propio (share/icons/hicolor/…/apps/sftp-commander); sin instalar, el genérico */
     gtk_window_set_default_icon_name("sftp-commander");
     gtk_window_set_default_size(GTK_WINDOW(a->win), 1200, 720);
+    preferencias_cargar(a);
     g_action_map_add_action_entries(G_ACTION_MAP(a->win), ACCIONES, G_N_ELEMENTS(ACCIONES), a);
+    g_simple_action_set_state(G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(a->win), "confirmar-copia")),
+                              g_variant_new_boolean(a->confirmar_copia));
     for (gsize i = 0; i < G_N_ELEMENTS(ATAJOS); i++)
         gtk_application_set_accels_for_action(g, ATAJOS[i].accion, ATAJOS[i].teclas);
     a->menu_ctx = crear_menu_contextual();
@@ -3236,6 +3847,19 @@ static void on_activar(GtkApplication *g, gpointer d)
     gtk_box_append(GTK_BOX(barra), a->clave);
     gtk_box_append(GTK_BOX(barra), a->btn_con);
     gtk_box_append(GTK_BOX(barra), b_admin);
+    /* menú ☰: preferencias y "Acerca de" */
+    GMenu *mp = g_menu_new(), *mp1 = g_menu_new(), *mp2 = g_menu_new();
+    g_menu_append(mp1, "Preguntar antes de copiar", "win.confirmar-copia");
+    g_menu_append(mp1, "Mostrar archivos ocultos (Ctrl+H)", "win.ocultos");
+    g_menu_append(mp2, "Acerca de SFTP Commander (F1)", "win.acerca");
+    g_menu_append_section(mp, NULL, G_MENU_MODEL(mp1));
+    g_menu_append_section(mp, NULL, G_MENU_MODEL(mp2));
+    GtkWidget *b_menu = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(b_menu), "open-menu-symbolic");
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(b_menu), G_MENU_MODEL(mp));
+    gtk_widget_set_tooltip_text(b_menu, "Menú");
+    g_object_unref(mp1); g_object_unref(mp2); g_object_unref(mp);
+    gtk_box_append(GTK_BOX(barra), b_menu);
 
     /* pestañas: una sesión por pestaña, "+" para abrir otra */
     a->tabs = gtk_notebook_new();
